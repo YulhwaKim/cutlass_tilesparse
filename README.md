@@ -9,13 +9,13 @@ In this project, we developed Tile-sparse Matrix multiplication. It is inspired 
 
 
 # Tile-sparse matrix encoding
-![ALT](/images/bsc.png "Tile-sparse matrix encoding")
+![ALT](/images/bsc.png | wdith 100)
 The tile-sparse matrix is encoded with CSC (Compressed Column Storage). The difference between the conventional CSC and tile-sparse CSC is that the basic encoding unit is the tile, not the single data point.
 As the above figure, ptr stores accumulated non-zero tiles for each column, indices stores row indices of each tile, and data stores data on non-zero tiles.
 
 
 # Performance
-![ALT](/images/performance.png "Tile-sparse performance comparison with Block-sparse on Matrix Multiplication. The weight matrix size is 4096x4096, and the minibatch is size of 32. The size of block/tile is 32x32.").
+![ALT](/images/performance.png "Tile-sparse performance comparison with Block-sparse on Matrix Multiplication. The weight matrix size is 4096x4096, and the minibatch is size of 32. The size of block/tile is 32x32.")
 Recently, OpenAI released [Block-sparse GPU Kernels](https://github.com/openai/blocksparse). As Tile-sparse, it computes block-wise sparse matrix. We compared the performance of Block-sparse and Tile-sparse kernels with TitanXp and CUDA9.0. As the above figure shows, Tile-sparse is slightly faster than Block-sparse, when used a 4096x4096 weight matrix, minibatch size of 32 and block/tile size of 32x32. (The relative speed can be changed according to the matrix size, minibatch size, and the tile size.)
 
 

@@ -145,7 +145,7 @@ struct block_task
         thread_accumulator_t;
 
     /// Dot-product vector type along the K-axis (e.g, uchar4 when using IDP4A)
-    typedef typename thread_accumulator_t::dp_vector_t dp_vector_t;
+    typedef typename thread_accumulator_t::dp_vector_t dp_vector_t; //for dp1, it is value_t
 
     enum
     {
@@ -153,7 +153,7 @@ struct block_task
         IsSmallTile = (ThreadItemsY < 4) && (ThreadItemsX < 4),
 
         /// Number of value_t in dp_vector_t
-        DpVectorItems = divide_assert<sizeof(dp_vector_t), sizeof(value_t)>::value,
+        DpVectorItems = divide_assert<sizeof(dp_vector_t), sizeof(value_t)>::value, // 1 for SGEMM
 
         /// Extent of block-wide C-tile in accum_t (and A-tiles in value_t) along M-axis (height)
         BlockItemsY = block_task_policy_t::BlockItemsY,
@@ -171,9 +171,11 @@ struct block_task
         BlockDpVectorsK = divide_assert<BlockItemsK, DpVectorItems>::value,
 
         /// Number of dp_vector_t along M-axis that can be read in a single LDS from the shared A-tile (up to 128b if more than one value_t)
+        /// LDG: CUDA Opcode, Load from Global Memory
+        /// LDS: CUDA Opcode, Load within Shared Memory Window
         LdsVectorDpVectorsA = __NV_STD_MIN(
             ThreadItemsY, 
-            __NV_STD_MAX(1, (128 / (__NV_STD_MAX(sizeof(dp_vector_t), sizeof(accum_t)) * 8)))),
+            __NV_STD_MAX(1, (128 / (__NV_STD_MAX(sizeof(dp_vector_t), sizeof(accum_t)) * 8)))),  // Why there is "sizof(accFum_t) * 8"?
 
         /// Number of dp_vector_t along N-axis that can be read in a single LDS from the shared B-tile (up to 128b if more than one value_t)
         LdsVectorDpVectorsB = __NV_STD_MIN(
@@ -187,6 +189,8 @@ struct block_task
         ThreadLdsVectorsB = divide_assert<ThreadItemsX, LdsVectorDpVectorsB>::value,
 
         /// Number of elements in one LDG/STG vector of C-tile
+        /// LDG: CUDA Opcode, Load from Global Memory
+        /// STG: Store to Global Memory
         ThreadLdgVectorSizeC = __NV_STD_MIN(LdgAlignC, 16) / (sizeof(accum_t)),
 
         /// Number of threads in warp
@@ -209,6 +213,7 @@ struct block_task
 
         /// Extent of block in warps along N-axis
         BlockWarpsX = divide_assert<BlockItemsX, WarpItemsX>::value,
+
     };
 
     /// Load-from-shared data movement type for A-tile, coarsened by LdsVectorDpVectorsA
@@ -237,7 +242,7 @@ struct block_task
             AllowRaggedTiles,                                   // AllowRaggedTiles
             dp_vector_t,                                        // dp_vector_t
             (TransformA == matrix_transform_t::NonTranspose) ?  // LoadAlgorithm
-                load_algorithm::CongruousCopy :
+                load_algorithm::CongruousCopyPrune :
                 load_algorithm::CrosswiseCopy>
         block_loader_a_t;
 
@@ -252,7 +257,7 @@ struct block_task
             AllowRaggedTiles,                                   // AllowRaggedTiles
             dp_vector_t,                                        // dp_vector_t
             (TransformB == matrix_transform_t::NonTranspose) ?  // LoadAlgorithm
-                load_algorithm::CrosswiseCopy :
+                load_algorithm::CrosswiseCopyPrune :
                 load_algorithm::CongruousCopy>
         block_loader_b_t;
 
@@ -275,6 +280,7 @@ struct block_task
     struct page_storage_t
     {
         /// Tile of A
+        /// __align__(16): align 16-byte words
         dp_vector_t __align__(16) block_a[BlockDpVectorsK][BlockItemsY + PadItemsA];
 
         /// Tile of B
@@ -363,6 +369,14 @@ struct block_task
     /// C tile accumulator
     thread_accumulator_t accumulator;
 
+    /// Block index in x-dim
+    int BlockIdX;
+
+    /// Extent of Block in tiles 
+    int BlockTiles;
+
+    /// the order of current tile
+    int tile_order;
 
     //-------------------------------------------------------------------------
     // Coordinate system helpers
@@ -402,6 +416,8 @@ struct block_task
         scratch_storage_t *scratch,
         value_t *d_a,
         value_t *d_b,
+        int     *d_ptr,
+        int     *d_indices,
         accum_t *d_c,
         epilogue_op_t epilogue_op,
         int dim_m,
@@ -422,29 +438,43 @@ struct block_task
         warp_thread_coords(thread_coords()),
         thread_strip_offset_a((warp_thread_coords.y * LdsVectorDpVectorsA) + (block_warp_coords.y * WarpItemsY)),
         thread_strip_offset_b((warp_thread_coords.x * LdsVectorDpVectorsB) + (block_warp_coords.x * WarpItemsX)),
+        BlockIdX(grid_raster.block_item_coords.x / BlockItemsX),
+        // BlockTiles(d_ptr[grid_raster.block_item_coords.x / BlockItemsX + 1] - d_ptr[grid_raster.block_item_coords.x / BlockItemsX]),
+        tile_order(0),
 
         loader_a(
             d_a,                                                            // d_matrix
+            d_ptr,                                                          // d_ptr
+            d_indices,                                                      // d_indices,
             dim_m,                                                          // matrix_values_l
             (TransformA == matrix_transform_t::NonTranspose) ? dim_m : 1,   // matrix_values_stride_k
             (TransformA == matrix_transform_t::NonTranspose) ? 1 : dim_k,   // matrix_values_stride_l
+            grid_raster.block_item_coords.x / BlockItemsX,                  // BlockIdX, block index in x dim
             make_int2(                                                      // block_begin_item_coords
                 grid_raster.block_item_coords.y,
                 block_item_coords_k),
             block_end_item_k),                                              // block_end_item_k
 
+
+
         loader_b(
             d_b,                                                            // d_matrix
+            d_ptr,                                                          // d_ptr
+            d_indices,                                                      // d_indices
             dim_n,                                                          // matrix_values_l
             (TransformB == matrix_transform_t::NonTranspose) ? 1 : dim_n,   // matrix_values_stride_k
-            (TransformB == matrix_transform_t::NonTranspose) ? dim_k : 1,   // matrix_values_stride_l
+            grid_raster.block_item_coords.x / BlockItemsX,                  // BlockIdX, block index in x dim
             make_int2(                                                      // block_begin_item_coords
                 grid_raster.block_item_coords.x,
                 block_item_coords_k),
             block_end_item_k),                                              // block_end_item_k
 
+
         accumulator(scratch->accum_scratch)
-    {}
+    {
+        BlockTiles = loader_b.wholek_tiles_remaining;
+    }
+    // {printf("grid_raster.block_item_coords.x: %d, grid_raster.block_item_coords.y : %d, BlockIdX: %d \n", grid_raster.block_item_coords.x , grid_raster.block_item_coords.y, BlockIdX);}
 
 
     //-------------------------------------------------------------------------
@@ -613,61 +643,77 @@ struct block_task
     /**
      * Compute GEMM
      */
+    // This is the part where load block-tile from global memory to shared memory,
+    // and compute thread-tile 
+    // Thus, we have to modify this part. & the request function of the block_loader
     __forceinline__ __device__
     void run()
     {
+        // printf("BlockDpVectorsK: %d \n", BlockDpVectorsK); //16
+        // if (grid_raster.block_item_coords.x / BlockItemsX == 3)
+        // if(threadIdx.x == 0)    printf("BlockTiles: %d \n", BlockTiles);
+
+        // return if there is no live tile
+        if (BlockTiles < 1) 
+            return;
+
+        
         // Quit if the thread block is fully out-of-bounds
         if (grid_raster.is_block_oob(dim_m, dim_n))
         {
             asm volatile("exit;");
         }
-
+    
         // Request global prefetch of first tile
         loader_a.request();
         loader_a.next();
         loader_b.request();
         loader_b.next();
-
+    
         // Commit global prefetch of first tile to shared memory
         loader_a.commit(scratch->pages[page_idx].block_a);
         loader_b.commit(scratch->pages[page_idx].block_b);
-
+    
         // Advance to next A,B tiles in K-axis
-        block_item_coords_k += BlockItemsK;
-
+        // block_item_coords_k += BlockItemsK;
+        tile_order += 1;
+    
         // Synchronize shared tiles and prepared accumulator
         __syncthreads();
-
+    
         // Initialize thread's slice of accumulators
         accumulator.init();
-
+    
         // Request first iteration of local prefetch strips
         request_local_prefetch(
             local_slices_a[0],
             local_slices_b[0],
             0);
-
+    
         //
         // Main loop
         //
-
+    
         // Consume tiles in A and B along the K-axis (all but last tile)
         #pragma unroll 1
-        while (block_item_coords_k < block_end_item_k)
+        // while (block_item_coords_k < block_end_item_k) 
+        while (tile_order < BlockTiles)
         {
             consume_tile<true>();
-
+    
             // Advance to next A,B tiles in K-axis
-            block_item_coords_k += BlockItemsK;
+            // block_item_coords_k += BlockItemsK;
+            tile_order += 1;
         }
-
+    
         // Consume last tile
         consume_tile<false>();
+        
 
         //
         // Eplilogue
         //
-
+    
         epilogue();
     }
 };

@@ -52,6 +52,8 @@ struct load_algorithm
     {
         CongruousCopy  = 0,
         CrosswiseCopy  = 1,
+        CongruousCopyPrune = 2,
+        CrosswiseCopyPrune = 3,
     };
 
     /**
@@ -159,4 +161,5 @@ struct block_loader
 
 #include "block_loader_crosswise.h"
 #include "block_loader_congruous_dp1.h"
-#include "block_loader_congruous_idp4.h"
+#include "block_loader_crosswise_prune.h"
+#include "block_loader_congruous_dp1_prune.h"

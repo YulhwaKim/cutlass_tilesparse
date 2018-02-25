@@ -42,80 +42,6 @@ namespace cutlass {
  ******************************************************************************/
 
 /**
- * Dispatch cuBLAS igemm
- */
-cublasStatus_t cublas_gemm_dispatch(
-    cublasHandle_t    cublas_handle,            ///< CUBLAS handle
-    cublasOperation_t transform_a,               ///< Transform op(A) that is non- or (conj.) transpose.
-    cublasOperation_t transform_b,               ///< Transform op(B) that is non- or (conj.) transpose.
-    int             m,                          ///< Height in rows of op(A) and C
-    int             n,                          ///< Width in columns of op(B) and C
-    int             k,                          ///< Width in columns of op(A) and height in rows of op(B)
-    int32_t         alpha,                      ///< Scalar used for multiplicands
-    int8_t          *d_a,                       ///< Device pointer to matrix A array values
-    int8_t          *d_b,                       ///< Device pointer to matrix B array values
-    int32_t         beta,                       ///< Scalar used for addend
-    int32_t         *d_c,                       ///< Device pointer to matrix C array values
-    cudaStream_t    stream = 0,                 ///< CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
-    bool            debug_synchronous = false)  ///< Whether or not to synchronize the stream after every kernel launch to check for errors.
-{
-    return cublasGemmEx(
-        cublas_handle,
-        transform_a,
-        transform_b,
-        m,
-        n,
-        k,
-        (void*) &alpha,
-        (void*) d_a,
-        CUDA_R_8I,
-        (transform_a == CUBLAS_OP_N) ? m : k,
-        (void*) d_b,
-        CUDA_R_8I,
-        (transform_b == CUBLAS_OP_N) ? k : n,
-        (void*) &beta,
-        (void*) d_c,
-        CUDA_R_32I,
-        m,
-        CUDA_R_32I,
-        CUBLAS_GEMM_DFALT);
-}
-
-
-/**
- * Dispatch cuBLAS hgemm
- */
-cublasStatus_t cublas_gemm_dispatch(
-    cublasHandle_t    cublas_handle,            ///< CUBLAS handle
-    cublasOperation_t transform_a,               ///< Transform op(A) that is non- or (conj.) transpose.
-    cublasOperation_t transform_b,               ///< Transform op(B) that is non- or (conj.) transpose.
-    int             m,                          ///< Height in rows of op(A) and C
-    int             n,                          ///< Width in columns of op(B) and C
-    int             k,                          ///< Width in columns of op(A) and height in rows of op(B)
-    __half          alpha,                      ///< Scalar used for multiplicands
-    __half          *d_a,                       ///< Device pointer to matrix A array values
-    __half          *d_b,                       ///< Device pointer to matrix B array values
-    __half          beta,                       ///< Scalar used for addend
-    __half          *d_c,                       ///< Device pointer to matrix C array values
-    cudaStream_t    stream = 0,                 ///< CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
-    bool            debug_synchronous = false)  ///< Whether or not to synchronize the stream after every kernel launch to check for errors.
-{
-    return cublasHgemm(
-        cublas_handle, transform_a, transform_b,
-        m, n, k,
-        &alpha,
-        d_a,
-        (transform_a == CUBLAS_OP_N) ? m : k,
-        d_b,
-        (transform_b == CUBLAS_OP_N) ? k : n,
-        &beta,
-        d_c,
-        m);
-
-}
-
-
-/**
  * Dispatch cuBLAS sgemm
  */
 cublasStatus_t cublas_gemm_dispatch(
@@ -175,45 +101,6 @@ cublasStatus_t cublas_gemm_dispatch(
         d_c, m);
 }
 
-/**
- * Dispatch cuBLAS Tensor Cores GEMM
- */
-cublasStatus_t cublas_gemm_dispatch(
-    cublasHandle_t    cublas_handle,            ///< CUBLAS handle
-    cublasOperation_t transform_a,               ///< Transform op(A) that is non- or (conj.) transpose.
-    cublasOperation_t transform_b,               ///< Transform op(B) that is non- or (conj.) transpose.
-    int             m,                          ///< Height in rows of op(A) and C
-    int             n,                          ///< Width in columns of op(B) and C
-    int             k,                          ///< Width in columns of op(A) and height in rows of op(B)
-    float           alpha,                      ///< Scalar used for multiplicands
-    half            *d_a,                       ///< Device pointer to matrix A array values
-    half            *d_b,                       ///< Device pointer to matrix B array values
-    float           beta,                       ///< Scalar used for addend
-    float           *d_c,                       ///< Device pointer to matrix C array values
-    cudaStream_t    stream = 0,                 ///< CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
-    bool            debug_synchronous = false)  ///< Whether or not to synchronize the stream after every kernel launch to check for errors.
-{
-    return cublasGemmEx(
-        cublas_handle,
-        transform_a,
-        transform_b,
-        m,
-        n,
-        k,
-        (void*) &alpha,
-        (void*) d_a,
-        CUDA_R_16F,
-        (transform_a == CUBLAS_OP_N) ? m : k,
-        (void*) d_b,
-        CUDA_R_16F,
-        (transform_b == CUBLAS_OP_N) ? k : n,
-        (void*) &beta,
-        (void*) d_c,
-        CUDA_R_32F,
-        m,
-        CUDA_R_32F,
-        CUBLAS_GEMM_DFALT_TENSOR_OP);
-}
 
 
 /**

@@ -228,6 +228,13 @@ struct block_loader<
         guard(0),
         residue_guard(0)
     {
+        // Debug ldg_vector_t
+        // thread_tile[0][0].print_info();
+        // printf("ThreadLdgVectorsK: %d , ThreadLdgVectorsL: %d \n", ThreadLdgVectorsK, ThreadLdgVectorsL); // 1, 1 for default SGEMM, small tile
+        // printf("StripmineLdgVectors: %d, StripmineLdgVectorsK: %d, StripmineLdgVectorsL: %d \n",          // 64, 4, 16 for default SGEMM, small tile
+            // StripmineLdgVectors, StripmineLdgVectorsK, StripmineLdgVectorsL);
+
+        // printf("DpVectorItems: %d \n", DpVectorItems); // 1 for SGEMM
         matrix_ldgvecs_l = matrix_items_l;
         matrix_ldgvec_stride_k = matrix_items_stride_k;
         matrix_ldgvec_stride_l = (matrix_items_stride_l / LdgVectorItems);

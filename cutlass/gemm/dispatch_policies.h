@@ -61,6 +61,7 @@ struct tiling_strategy : printable_t
         Tall,
         Wide,
         Huge,
+        Custom
     };
 
     /// Enumerant value
@@ -87,6 +88,7 @@ struct tiling_strategy : printable_t
             case Tall:      return "tall";
             case Wide:      return "wide";
             case Huge:      return "huge";
+            case Custom:    return "Custom";
             case Unknown:
             default:        return "unknown";
         }
@@ -116,6 +118,24 @@ struct gemm_policy;
 /******************************************************************************
  * SGEMM
  ******************************************************************************/
+
+/**
+ * GEMM task policy specialization for Custom sgemm
+ */
+template <
+    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
+    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
+struct gemm_policy<float, float, TransformA, TransformB, tiling_strategy::Custom> :
+    block_task_policy<
+        32,     // _BlockItemsY
+        32,     // _BlockItemsX
+        32,      // _BlockItemsK
+        4,      // _ThreadItemsY
+        4,      // _ThreadItemsX
+        false,  // _UseDoubleScratchTiles
+        grid_raster_strategy::Default>   // _RasterStrategy
+{};
+
 
 /**
  * GEMM task policy specialization for small sgemm
@@ -226,6 +246,23 @@ struct gemm_policy<float, float, TransformA, TransformB, tiling_strategy::Huge> 
  ******************************************************************************/
 
 /**
+ * GEMM task policy specialization for Custom dgemm
+ */
+template <
+    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
+    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
+struct gemm_policy<double, double, TransformA, TransformB, tiling_strategy::Custom> :
+    block_task_policy<
+        32,     // _BlockItemsY
+        32,     // _BlockItemsX
+        32,      // _BlockItemsK
+        4,      // _ThreadItemsY
+        4,      // _ThreadItemsX
+        false,  // _UseDoubleScratchTiles
+        grid_raster_strategy::Default>   // _RasterStrategy
+{};
+
+/**
  * GEMM task policy specialization for small dgemm
  */
 template <
@@ -327,334 +364,6 @@ struct gemm_policy<double, double, TransformA, TransformB, tiling_strategy::Huge
         false,  // _UseDoubleScratchTiles
         grid_raster_strategy::Default>   // _RasterStrategy
 {};
-
-
-/******************************************************************************
- * HGEMM
- ******************************************************************************/
-
-/**
- * GEMM task policy specialization for small hgemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<__half, __half, TransformA, TransformB, tiling_strategy::Small> :
-    block_task_policy<
-        32,     // _BlockItemsY
-        32,     // _BlockItemsX
-        8,      // _BlockItemsK
-        4,      // _ThreadItemsY
-        4,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>   // _RasterStrategy
-{};
-
-/**
- * GEMM task policy specialization for medium hgemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<__half, __half, TransformA, TransformB, tiling_strategy::Medium> :
-    block_task_policy<
-        32,     // _BlockItemsY
-        32,     // _BlockItemsX
-        16,     // _BlockItemsK
-        8,      // _ThreadItemsY
-        4,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>   // _RasterStrategy
-{};
-
-/**
- * GEMM task policy specialization for large hgemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<__half, __half, TransformA, TransformB, tiling_strategy::Large> :
-    block_task_policy<
-        64,     // _BlockItemsY
-        64,     // _BlockItemsX
-        8,      // _BlockItemsK
-        16,     // _ThreadItemsY
-        8,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>   // _RasterStrategy
-{};
-
-/**
- * GEMM task policy specialization for tall hgemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<__half, __half, TransformA, TransformB, tiling_strategy::Tall> :
-    block_task_policy<
-        128,    // _BlockItemsY
-        32,     // _BlockItemsX
-        8,      // _BlockItemsK
-        16,     // _ThreadItemsY
-        4,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>   // _RasterStrategy
-{};
-
-
-/**
- * GEMM task policy specialization for wide hgemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<__half, __half, TransformA, TransformB, tiling_strategy::Wide> :
-    block_task_policy<
-        32,     // _BlockItemsY
-        128,    // _BlockItemsX
-        8,      // _BlockItemsK
-        8,      // _ThreadItemsY
-        8,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>   // _RasterStrategy
-{};
-
-/**
- * GEMM task policy specialization for huge hgemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<__half, __half, TransformA, TransformB, tiling_strategy::Huge> :
-    block_task_policy<
-        128,    // _BlockItemsY
-        128,    // _BlockItemsX
-        8,      // _BlockItemsK
-        16,     // _ThreadItemsY
-        8,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>   // _RasterStrategy
-{};
-
-
-/******************************************************************************
- * IGEMM
- ******************************************************************************/
-
-/**
- * GEMM task policy specialization for small igemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<int8_t, int32_t, TransformA, TransformB, tiling_strategy::Small> :
-    block_task_policy<
-        16,     // _BlockItemsY
-        32,     // _BlockItemsX
-        32,     // _BlockItemsK
-        4,      // _ThreadItemsY
-        4,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>   // _RasterStrategy
-{};
-
-
-/**
- * GEMM task policy specialization for medium igemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<int8_t, int32_t, TransformA, TransformB, tiling_strategy::Medium> :
-    block_task_policy<
-        32,     // _BlockItemsY
-        32,     // _BlockItemsX
-        32,     // _BlockItemsK
-        4,      // _ThreadItemsY
-        4,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>   // _RasterStrategy
-{};
-
-/**
- * GEMM task policy specialization for large igemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<int8_t, int32_t, TransformA, TransformB, tiling_strategy::Large> :
-    block_task_policy<
-        64,     // _BlockItemsY
-        64,     // _BlockItemsX
-        32,     // _BlockItemsK
-        8,      // _ThreadItemsY
-        4,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>  // _RasterStrategy
-{};
-
-/**
- * GEMM task policy specialization for large igemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<int8_t, int32_t, TransformA, TransformB, tiling_strategy::Tall> :
-    block_task_policy<
-        128,    // _BlockItemsY
-        64,     // _BlockItemsX
-        64,     // _BlockItemsK
-        8,      // _ThreadItemsY
-        4,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>   // _RasterStrategy
-{};
-
-/**
- * GEMM task policy specialization for large igemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<int8_t, int32_t, TransformA, TransformB, tiling_strategy::Wide> :
-    block_task_policy<
-        64,     // _BlockItemsY
-        128,    // _BlockItemsX
-        64,     // _BlockItemsK
-        4,      // _ThreadItemsY
-        8,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>  // _RasterStrategy
-{};
-
-/**
- * GEMM task policy specialization for huge igemm
- */
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<int8_t, int32_t, TransformA, TransformB, tiling_strategy::Huge> :
-    block_task_policy<
-        128,    // _BlockItemsY
-        128,    // _BlockItemsX
-        32,     // _BlockItemsK
-        8,      // _ThreadItemsY
-        8,      // _ThreadItemsX
-        false,  // _UseDoubleScratchTiles
-        grid_raster_strategy::Default>  // _RasterStrategy
-{};
-
-
-/******************************************************************************
- * WMMA GEMM
- ******************************************************************************/
-
-// WMMA is a preview feature in CUDA. Conditionally enable wmma_gemm policies.
-#if defined(WMMA)
-
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<half, float, TransformA, TransformB, tiling_strategy::Small> :
-    gemm::block_task_wmma_policy<
-        16,     // _BlockItemsY
-        16,     // _BlockItemsX
-        16,     // _BlockItemsK
-        16,     // _WarpItemsY
-        16,     // _WarpItemsX
-        16,     // _WmmaItemsY
-        16,     // _WmmaItemsX
-        16,     // _WmmaItemsK
-        false,  // _UseDoubleScratchTiles
-        gemm::grid_raster_strategy::Default>    // _RasterStrategy
-{};
-
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy<half, float, TransformA, TransformB, tiling_strategy::Medium> :
-    gemm::block_task_wmma_policy<
-        32,     // _BlockItemsY
-        32,     // _BlockItemsX
-        32,     // _BlockItemsK
-        32,     // _WarpItemsY
-        32,     // _WarpItemsX
-        16,     // _WmmaItemsY
-        16,     // _WmmaItemsX
-        16,     // _WmmaItemsK
-        false,  // _UseDoubleScratchTiles
-        gemm::grid_raster_strategy::Default>    // _RasterStrategy
-{};
-
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy< half, float, TransformA, TransformB, tiling_strategy::Large> :
-    gemm::block_task_wmma_policy<
-        64,     // _BlockItemsY
-        64,     // _BlockItemsX
-        32,     // _BlockItemsK
-        32,     // _WarpItemsY
-        64,     // _WarpItemsX
-        16,     // _WmmaItemsY
-        16,     // _WmmaItemsX
-        16,     // _WmmaItemsK
-        false,  // _UseDoubleScratchTiles
-        gemm::grid_raster_strategy::Default>    // _RasterStrategy
-{};
-
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy< half, float, TransformA, TransformB, tiling_strategy::Tall> :
-    gemm::block_task_wmma_policy<
-        128,    // _BlockItemsY
-        64,     // _BlockItemsX
-        64,     // _BlockItemsK
-        32,     // _WarpItemsY
-        64,     // _WarpItemsX
-        16,     // _WmmaItemsY
-        16,     // _WmmaItemsX
-        16,     // _WmmaItemsK
-        false,  // _UseDoubleScratchTiles
-        gemm::grid_raster_strategy::Default>    // _RasterStrategy
-{};
-
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy< half, float, TransformA, TransformB, tiling_strategy::Wide> :
-    gemm::block_task_wmma_policy<
-        64,     // _BlockItemsY
-        128,    // _BlockItemsX
-        64,     // _BlockItemsK
-        32,     // _WarpItemsY
-        64,     // _WarpItemsX
-        16,     // _WmmaItemsY
-        16,     // _WmmaItemsX
-        16,     // _WmmaItemsK
-        false,  // _UseDoubleScratchTiles
-        gemm::grid_raster_strategy::Default>    // _RasterStrategy
-{};
-
-template <
-    matrix_transform_t::kind_t TransformA,      ///< Transformation op for matrix A
-    matrix_transform_t::kind_t TransformB>      ///< Transformation op for matrix B
-struct gemm_policy< half, float, TransformA, TransformB, tiling_strategy::Huge> :
-    gemm::block_task_wmma_policy<
-        128,    // _BlockItemsY
-        128,    // _BlockItemsX
-        64,     // _BlockItemsK
-        32,     // _WarpItemsY
-        64,     // _WarpItemsX
-        16,     // _WmmaItemsY
-        16,     // _WmmaItemsX
-        16,     // _WmmaItemsK
-        false,  // _UseDoubleScratchTiles
-        gemm::grid_raster_strategy::Default>    // _RasterStrategy
-{};
-
-#endif
 
 
 } // namespace gemm

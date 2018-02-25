@@ -36,7 +36,6 @@
 
 #include "../util/util.h"
 #include "block_task.h"
-#include "block_task_wmma.h"
 #include "grid_raster.h"
 #include "dispatch_policies.h"
 #include "k_split_control.h"
@@ -67,6 +66,8 @@ struct param_pack
     k_split_control k_split;    ///< Abstraction for controlling inter-block k-splitting
     value_t *d_a;               ///< Pointer to matrix A array values
     value_t *d_b;               ///< Pointer to matrix B array values
+    int     *d_ptr;             ///< Pointer to ptr of pruned B matrix
+    int     *d_indices;         ///< Pointer to indices of pruned B mattrix
     accum_t *d_c;               ///< Pointer to matrix C array values
     epilogue_op_t epilogue_op;
 
@@ -78,6 +79,8 @@ struct param_pack
         epilogue_op_t op,           ///< Epilogue operation to update matrix C
         value_t *d_a,               ///< Pointer to matrix A array values
         value_t *d_b,               ///< Pointer to matrix B array values
+        int     *d_ptr,             ///< Pointer to ptr of pruned B matrix
+        int     *d_indices,         ///< Pointer to indices of pruned B matrix
         accum_t *d_c)               ///< Pointer to matrix C array values
     :
         m(m),
@@ -87,6 +90,8 @@ struct param_pack
         epilogue_op(op),
         d_a(d_a),
         d_b(d_b),
+        d_ptr(d_ptr),
+        d_indices(d_indices),
         d_c(d_c)
     {}
 
@@ -154,50 +159,6 @@ struct gemm_block_task<
             AllowRaggedTiles> type;
 };
 
-/// Matrix math operations
-template <
-    typename                    block_task_policy_t,  ///< Parameterization of block_task_policy
-    typename                    value_t,            ///< Multiplicand value type (matrices A and B)
-    typename                    accum_t,            ///< Accumulator value type (matrix C and scalars)
-    matrix_transform_t::kind_t  TransformA,         ///< View transform enumerant for matrix A
-    int                         LdgAlignA,          ///< Alignment (in bytes) for A operand
-    matrix_transform_t::kind_t  TransformB,         ///< View transform enumerant for matrix B
-    int                         LdgAlignB,          ///< Alignment (in bytes) for B operand
-    typename                    epilogue_op_t,      ///< Epilogue operation applied to GEMM
-    int                         LdgAlignC,          ///< Alignment (in bytes) for C operand
-    bool                        AllowRaggedTiles    ///< Whether GEMM supports matrix sizes other than multiple of BlockItems{XY}
->
-struct gemm_block_task<
-    math_operation_class_t::matrix,
-    block_task_policy_t,
-    value_t,
-    accum_t,
-    TransformA,
-    LdgAlignA,
-    TransformB,
-    LdgAlignB,
-    epilogue_op_t,
-    LdgAlignC,
-    AllowRaggedTiles>
-{
-
-#if defined(WMMA)   // conditional compilation with WMMA headers
-
-    // Parameterize task type
-    typedef block_task_wmma<
-            block_task_policy_t,
-            value_t,
-            accum_t,
-            TransformA,
-            LdgAlignA,
-            TransformB,
-            LdgAlignB,
-            epilogue_op_t,
-            LdgAlignC,
-            AllowRaggedTiles> type;
-
-#endif
-};
 
 /******************************************************************************
  * GEMM kernel entrypoint
@@ -245,12 +206,15 @@ __global__ void kernel(param_pack<value_t, accum_t, epilogue_op_t> pack)
         &smem,
         pack.d_a,
         pack.d_b,
+        pack.d_ptr,
+        pack.d_indices,
         pack.d_c,
         pack.epilogue_op,
         pack.m,
         pack.n,
         pack.k,
         pack.k_split).run();
+
 }
 
 
@@ -346,6 +310,8 @@ launch_configuration dispatch(
     epilogue_op_t   epilogue_op,                    ///< Epilogue operation to update matrix C
     value_t         *d_a,                           ///< Device pointer to matrix A array values
     value_t         *d_b,                           ///< Device pointer to matrix B array values
+    int             *d_ptr,                         ///< Device pointer to ptr of pruned B matrix
+    int             *d_indices,                     ///< Device pointer to indices of pruned B matrix
     accum_t         *d_c,                           ///< Device pointer to matrix C array values
     cudaStream_t    stream = 0,                     ///< CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
     bool            debug_synchronous = true)       ///< Whether or not to synchronize the stream after every kernel launch
@@ -364,7 +330,7 @@ launch_configuration dispatch(
     launch_configuration config;
 
     // Compute block dims
-    config.block = dim3(block_task_policy_t::BlockThreads);
+    config.block = dim3(block_task_policy_t::BlockThreads);// dim3(block_task_policy_t::BlockThreads); //only x dim has value
 
     // Compute shared memory
     int dynamic_smem_bytes = 0;
@@ -382,10 +348,11 @@ launch_configuration dispatch(
 
     // Compute grid extents
     config.grid = grid_raster_t::grid_dims(m, n);
+    // printf("grid (x, y, z) = (%d, %d, %d) \n", config.grid.x, config.grid.y, config.grid.z);
 
     // Get SM count
     int sm_count;
-    if (CUDA_PERROR_DEBUG(config.result = get_sm_count(sm_count)))
+    if (CUDA_PERROR_DEBUG(config.result = get_sm_count(sm_count))) // 30 SM for TitanXp
         return config;
 
     // Get k-split flag storage (TODO: make a pool)
@@ -403,12 +370,14 @@ launch_configuration dispatch(
         config.block,
         config.grid);     // in,out
 
-    config.split_k = k_split.split_k;
+    config.split_k = k_split.split_k; // It is k unless the wave efficiency is less than 0.9
+    // wave_efficiency means the number of active warps per the device capability for every active wave
 
     // Log kernel configuration
     if (debug_synchronous)
     {
         // Compute tiling efficiency
+        // tiling efficiency??
         float block_tiling_efficiency = float(block_task_policy_t::BlockItemsY * block_task_policy_t::BlockItemsX) /
             float(block_task_policy_t::BlockItemsY + block_task_policy_t::BlockItemsX);
 
@@ -438,6 +407,8 @@ launch_configuration dispatch(
         epilogue_op,
         d_a,
         d_b,
+        d_ptr,
+        d_indices,
         d_c);
 
     // Prepare k-split coordinator
@@ -447,6 +418,7 @@ launch_configuration dispatch(
     }
 
     // Invoke kernel
+    // dynamic_smem_bytes: 0, stream: 0
     kernel_ptr<<< config.grid, config.block, dynamic_smem_bytes, stream >>>(pack);
 
     // Check for failure to launch
@@ -486,6 +458,8 @@ launch_configuration device_gemm(
     epilogue_op_t   epilogue_op,                ///< Epilogue operation to update matrix C
     value_t         *d_a,                       ///< Device pointer to matrix A array values
     value_t         *d_b,                       ///< Device pointer to matrix B array values
+    int             *d_ptr,                     ///< Device pointer to ptr of pruned B matrix
+    int             *d_indices,                 ///< Device pointer to indices of pruned B matrix
     accum_t         *d_c,                       ///< Device pointer to matrix C array values
     cudaStream_t    stream = 0,                 ///< CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
     bool            debug_synchronous = false)  ///< Whether or not to synchronize the stream after every kernel launch to
@@ -512,6 +486,8 @@ launch_configuration device_gemm(
             epilogue_op,
             d_a,
             d_b,
+            d_ptr,
+            d_indices,
             d_c,
             stream,
             debug_synchronous);
@@ -529,6 +505,8 @@ launch_configuration device_gemm(
             epilogue_op,
             d_a,
             d_b,
+            d_ptr,
+            d_indices,
             d_c,
             stream,
             debug_synchronous);

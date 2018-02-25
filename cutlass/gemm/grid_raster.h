@@ -153,10 +153,12 @@ struct grid_raster<
     inline __device__
     grid_raster()
     {
+        // printf("ColumnMajor\n");
         // blockDim.x is the fastest changing grid dim on current architectures
         block_item_coords = make_int2(
             BlockItemsX * blockIdx.y,
             BlockItemsY * blockIdx.x);
+        // printf("blockIdx.y: %d, blockIdx.x: %d \n", blockIdx.y, blockIdx.x);
     }
 
     /// Whether the base \p block_item_coords are out-of-bounds for an m*n matrix C
@@ -217,6 +219,7 @@ struct grid_raster<
     inline __device__
     grid_raster()
     {
+        // printf("RowMajor \n");
         // blockDim.x is the fastest changing grid dim on current architectures
         block_item_coords = make_int2(
             BlockItemsX * blockIdx.x,

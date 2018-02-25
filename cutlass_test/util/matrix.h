@@ -38,7 +38,6 @@
 
 #include <cutlass/util/debug.h>
 #include "../cutlass/util/matrix_transform.h"
-#include "half.h"
 
 
 namespace cutlass {
@@ -51,11 +50,7 @@ template <typename value_t>
 struct matrix
 {
     // Host value type (must be convertible to/from value_t)
-    typedef typename nv_std::conditional<
-            (nv_std::is_same<value_t, __half>::value),  // If (value_t == __half) ...
-            half_t,                                     // ... use half_t internally for host storage, else...
-            value_t>::type                              // ... use value_t directly
-        host_value_t;
+     typedef value_t host_value_t;
 
 
     //-----------------------------------------------------------------------------
@@ -173,7 +168,7 @@ public:
     {
         switch (transpose_op)
         {
-            case matrix_transform_t::NonTranspose :    return _h_data[y + (x * _m)];
+            case matrix_transform_t::NonTranspose :    return _h_data[y + (x * _m)]; // column major
             case matrix_transform_t::Transpose :       return _h_data[x + (y * _m)];
             default: return 0;
         }
@@ -284,6 +279,25 @@ public:
 
 
     /**
+    * This Function prune the given block of matrix with nonTransform
+    */
+    void block_prune(int startX, int XBlocks, int startY, int YBlocks)
+    {
+        for (int x = 0; x < XBlocks; x++){
+            for (int y = 0; y < YBlocks; y++){
+                // prune the value in the matrix
+                int YIdx = (y + startY);
+                int XIdx = (x + startX);
+                if ((YIdx < _m) && (XIdx < _n))
+                    _h_data[YIdx + XIdx * _m]  = 0;
+            }
+        }
+        // printf("\n");
+    }
+
+
+
+    /**
      * Element-wise matrix addition
      */
     matrix & operator+=(matrix const &mat)
@@ -365,18 +379,6 @@ public:
     // Floating point "almost-equal" utilities
     //-----------------------------------------------------------------------------
 
-    static bool almost_equal_ulps(half_t a, half_t b, int max_ulps)
-    {
-        if (a == b)
-            return true;
-
-        int32_t int_diff = abs(a.raw() - b.raw());
-        if (int_diff <= max_ulps)
-            return true;
-        return false;
-    }
-
-
     static bool almost_equal_ulps(float a, float b, int max_ulps)
     {
         if (a == b)
@@ -398,10 +400,6 @@ public:
         return false;
     }
 
-    static bool almost_equal_ulps(int32_t a, int32_t b, int max_ulps)
-    {
-        return (a == b);
-    }
 
 
     //-----------------------------------------------------------------------------
@@ -491,6 +489,7 @@ public:
                             accum += host_value_t(A.get(k, y, transform_a)) * host_value_t(B.get(x, k, transform_b));
                         }
 
+                        // We can figure out that the data is stored in 'column major' format
                         _h_data[y + x * M] = (alpha * accum) + (beta * _h_data[y + x * M]);
                     }
                 }

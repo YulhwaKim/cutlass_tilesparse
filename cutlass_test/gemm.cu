@@ -42,10 +42,6 @@
 // Set Cutlass debug macro to enable console printing of library errors
 #define DEBUG
 
-#if defined(WMMA)
-// Conditionally include WMMA headers (CUDA 9 Preview Feature)
-#include <mma.h>
-#endif
 
 // Cutlass GEMM API
 #include <cutlass/util/util.h>
@@ -54,10 +50,10 @@
 
 // Test utilities
 #include "util/command_line.h"
-#include "util/half.h"
 #include "util/matrix.h"
 #include "util/timer.h"
 #include "util/type_conversion.h"
+#include "util/bsc.h"
 
 // Dispatch routines to CUBLAS and CUTLASS
 #include "cublas_dispatch.h"
@@ -106,12 +102,9 @@ struct simple_gen
 };
 
 
-
-
 /******************************************************************************
- * Test execution
+ * CUBLAS Test execution
  ******************************************************************************/
-
 
 /**
  * Compute C = (alpha * A * B) + (beta * C)
@@ -122,7 +115,7 @@ template <
     matrix_transform_t::kind_t  TransformB,     ///< Transformation op for matrix B
     typename                    value_t,        ///< Multiplicand value type (matrices A and B)
     typename                    accum_t>        ///< Accumulator value type (matrix C and scalars)
-bool test(
+bool test_cublas(
     int m,          ///< Height of C in rows
     int n,          ///< Width of C in columns
     int k,          ///< Width (height) of A (B)
@@ -152,21 +145,18 @@ bool test(
     B.fill_random(b_gen);
     C.fill_ramp(0,0);
 
-//    // Alternatively, initialize with procedural values to simplify debugging incorrect results
-//    A.fill_ramp(1,2);
-//    B.fill_ramp(1,1);
-
     // Sync to device
     A.sync_device();
     B.sync_device();
     C.sync_device();
 
+
     CUDA_PERROR(cudaPeekAtLastError());
     CUDA_PERROR(cudaDeviceSynchronize());
 
-    //
+    //    
     // Run test once with debug-synchronous enabled and check result
-    //
+    // 
 
     if (!g_schmoo) printf("\n");
 
@@ -174,6 +164,7 @@ bool test(
 
     C.fill_ramp(0, 0);
     C.sync_device();
+
 
     cudaError_t error = test_func(
         g_cublas_handle,
@@ -187,6 +178,263 @@ bool test(
         beta,
         stream,
         !g_schmoo).result;
+    
+    bool not_applicable = (error == cudaErrorInvalidValue);
+    bool is_failed = false;
+    if (not_applicable)
+    {
+        printf(", NA");
+    }
+    else
+    {
+        CUDA_PERROR(error);
+
+        // Compute reference check if wont take too long on CPU
+        if ((!g_schmoo) && (m * n <= 1024 * 1024))
+        // if(!g_schmoo) // for debug every case
+        {
+            matrix<accum_t> ref_C(m, n);
+            ref_C.fill_ramp(0, 0);
+            ref_C.gemm(TransformA, TransformB, alpha, A, B, beta);
+            C.sync_host();
+
+            is_failed = (C != ref_C);
+
+            if (!g_schmoo)
+            {
+                if (is_failed)
+                {
+                    printf("FAIL, ");
+                    std::ofstream file_a("a.csv");
+                    A.write_matrix(file_a);
+                    std::ofstream file_b("b.csv");
+                    B.write_matrix(file_b);
+                    std::ofstream file_d("gemm-REF.csv");
+                    ref_C.write_matrix(file_d);
+                    std::ofstream file_c("gemm-GPU.csv");
+                    C.write_matrix(file_c);
+                }
+                else
+                {
+                    printf("PASS, ");
+                }
+            }
+        }
+        fflush(stdout);
+
+        //
+        // Warmup and timing iterations
+        //
+
+        if (g_timing_iterations > 0)
+        {
+            // Warmup for 1/100 of the timing iterations (minimum of 2)
+            for (int i = 0; i < __NV_STD_MAX(2, (g_timing_iterations + 99) / 100); ++i)
+            {    
+                CUDA_PERROR(test_func(
+                    g_cublas_handle,
+                    m,
+                    n,
+                    k,
+                    A.d_data(),
+                    B.d_data(),
+                    C.d_data(),
+                    alpha,
+                    beta,
+                    stream,
+                    false).result);                
+            }
+        }
+
+        // Conduct timing iterations
+        double elapsed_ms = 0;
+        gpu_timer timer;
+        timer.start();
+
+        for (int i = 0; i < g_timing_iterations; i++)
+        {
+            CUDA_PERROR(test_func(
+                g_cublas_handle,
+                m,
+                n,
+                k,
+                A.d_data(),
+                B.d_data(),
+                C.d_data(),
+                alpha,
+                beta,
+                stream,
+                false).result);
+        }
+
+        timer.stop();
+        elapsed_ms += timer.elapsed_millis();
+        double avg_ms = elapsed_ms / g_timing_iterations;
+
+        // Display performance
+        if (g_timing_iterations > 0)
+        {
+            int64_t num_flops      = (2 * int64_t(m) * int64_t(n) * int64_t(k)) + (2 * int64_t(m) * int64_t(n));
+            double gflops_per_sec   = double(num_flops) / avg_ms / 1.0e6;
+
+            if (g_schmoo)
+            {
+                if (is_failed)
+                    printf("F");
+
+                printf(", %.3f", gflops_per_sec);
+
+                // Sleep for a few milliseconds to cool
+                sleep_millis(10);
+            }
+            else
+            {
+                printf("Avg runtime: %.3f ms, total flops: %lld, GFLOP/s: %.2f\n",
+                    avg_ms,
+                    num_flops,
+                    gflops_per_sec);
+            }
+            fflush(stdout);
+        }
+    }
+
+    return is_failed;
+}
+
+
+
+/******************************************************************************
+ * CUTLASS Test execution
+ ******************************************************************************/
+
+
+/**
+ * Compute C = (alpha * A * B) + (beta * C)
+ */
+template <
+    typename                        test_func_t,    ///< Test function type
+    gemm::tiling_strategy::kind_t   TilingStrategy,
+    matrix_transform_t::kind_t      TransformA,     ///< Transformation op for matrix A
+    matrix_transform_t::kind_t      TransformB,     ///< Transformation op for matrix B
+    typename                        value_t,        ///< Multiplicand value type (matrices A and B)
+    typename                        accum_t>        ///< Accumulator value type (matrix C and scalars)
+bool test_bsc(
+    int m,          ///< Height of C in rows
+    int n,          ///< Width of C in columns
+    int k,          ///< Width (height) of A (B)
+    accum_t alpha,  ///< Multiplicand scalar
+    accum_t beta)   ///< Addend scalar
+{
+    cudaStream_t stream = 0;
+
+    //
+    // Initialize matrices
+    //
+
+    typedef gemm::gemm_policy<value_t, accum_t, TransformA, TransformB, TilingStrategy> block_task_policy_t;
+
+    matrix<value_t> A(
+        (TransformA == matrix_transform_t::NonTranspose) ? m : k,
+        (TransformA == matrix_transform_t::NonTranspose) ? k : m);
+
+    matrix<value_t> B(
+        (TransformB == matrix_transform_t::NonTranspose) ? k : n,
+        (TransformB == matrix_transform_t::NonTranspose) ? n : k);
+
+    matrix<accum_t> C(m, n);
+
+    // initialized matrices with small values precisely representable as integers
+    simple_gen a_gen(3);
+    simple_gen b_gen(5);
+    A.fill_random(a_gen);
+    B.fill_random(b_gen);
+    C.fill_ramp(0,0);
+
+//    // Alternatively, initialize with procedural values to simplify debugging incorrect results
+//    A.fill_ramp(1,2);
+//    B.fill_ramp(1,1);
+    
+    // matrix pruning
+    int BlockItemsN = block_task_policy_t::BlockItemsX; // depend on the block task policy
+    int BlockItemsK = block_task_policy_t::BlockItemsK;
+    printf("BlockItemsN: %d, BlockItemsK: %d \n", BlockItemsN, BlockItemsK);
+
+    int NBlocks = (n % BlockItemsN == 0)? n / BlockItemsN : n / BlockItemsN + 1;
+    int KBlocks = (k % BlockItemsK == 0)? k / BlockItemsK : k / BlockItemsK + 1;
+    // printf("NBlocks: %d, KBlocks: %d \n", NBlocks, KBlocks);
+
+    //prune the matrix B
+    int nonZeroBlocks = 0;
+    int ZeroBlocks = 0;
+    for (int i = 0; i < KBlocks; i++){
+        for (int j = 0; j < NBlocks; j++){
+            bool Prune = (rand() % 100) <= 50;
+            if (Prune) {
+                ZeroBlocks ++;
+                int startN = j * BlockItemsN;
+                int startK = i * BlockItemsK;
+                // printf("startN: %d, startK: %d \n", startN, startK);
+                B.block_prune(startN, BlockItemsN, startK, BlockItemsK);
+            }
+            else {
+                nonZeroBlocks ++;
+            }
+        }
+    }
+    printf("nonZeroBlocks: %d, ZeroBlocks: %d \n", nonZeroBlocks, ZeroBlocks);
+
+    bsc<value_t> B_bsc(
+        NBlocks, KBlocks, nonZeroBlocks, BlockItemsN, BlockItemsK, 
+        B.h_data(), k, n);
+
+
+
+    // Sync to device
+    A.sync_device();
+    B.sync_device();
+    B_bsc.sync_device();
+    C.sync_device();
+
+    // save B, B_bsc
+    std::ofstream outFile;
+    // outFile.open("B.csv");
+    // B.write_matrix(outFile);
+    // outFile.close();
+
+    outFile.open("B_bsc.csv");
+    B_bsc.write_bsc(outFile);
+    outFile.close();
+
+    CUDA_PERROR(cudaPeekAtLastError());
+    CUDA_PERROR(cudaDeviceSynchronize());
+
+    //    
+    // Run test once with debug-synchronous enabled and check result
+    // 
+
+    if (!g_schmoo) printf("\n");
+
+    test_func_t test_func;
+
+    C.fill_ramp(0, 0);
+    C.sync_device();
+
+
+    cudaError_t error = test_func(
+        g_cublas_handle,
+        m,
+        n,
+        k,
+        A.d_data(),
+        B_bsc.d_data(),
+        B_bsc.d_ptr(),
+        B_bsc.d_indices(),
+        C.d_data(),
+        alpha,
+        beta,
+        stream,
+        !g_schmoo).result;
+
 
     bool not_applicable = (error == cudaErrorInvalidValue);
     bool is_failed = false;
@@ -200,6 +448,7 @@ bool test(
 
         // Compute reference check if wont take too long on CPU
         if ((!g_schmoo) && (m * n <= 1024 * 1024))
+        // if(!g_schmoo) // for debug every case
         {
             matrix<accum_t> ref_C(m, n);
             ref_C.fill_ramp(0, 0);
@@ -245,7 +494,9 @@ bool test(
                     n,
                     k,
                     A.d_data(),
-                    B.d_data(),
+                    B_bsc.d_data(),
+                    B_bsc.d_ptr(),
+                    B_bsc.d_indices(),
                     C.d_data(),
                     alpha,
                     beta,
@@ -267,7 +518,9 @@ bool test(
                 n,
                 k,
                 A.d_data(),
-                B.d_data(),
+                B_bsc.d_data(),
+                B_bsc.d_ptr(),
+                B_bsc.d_indices(),
                 C.d_data(),
                 alpha,
                 beta,
@@ -362,8 +615,9 @@ bool test(
     }
     fflush(stdout);
 
+    // It calls 'test' right above this 'test' function
     // CUBLAS
-    test_error |= test<
+    test_error |= test_cublas<
         cublas_gemm<gemm::tiling_strategy::Unknown, math_op, TransformA, TransformB, value_t, accum_t>,
         TransformA,
         TransformB,
@@ -371,43 +625,57 @@ bool test(
         accum_t>(m, n, k, accum_t(alpha), accum_t(beta));
 
     // CUTLASS
-    test_error |= test<
+    test_error |= test_bsc<
+        cutlass_gemm_dispatch<gemm::tiling_strategy::Custom, math_op, TransformA, TransformB, value_t, accum_t>,
+        gemm::tiling_strategy::Custom,
+        TransformA,
+        TransformB,
+        value_t,
+        accum_t>(m, n, k, accum_t(alpha), accum_t(beta));
+
+    test_error |= test_bsc<
         cutlass_gemm_dispatch<gemm::tiling_strategy::Small, math_op, TransformA, TransformB, value_t, accum_t>,
+        gemm::tiling_strategy::Small,
         TransformA,
         TransformB,
         value_t,
         accum_t>(m, n, k, accum_t(alpha), accum_t(beta));
 
-    test_error |= test<
+    test_error |= test_bsc<
         cutlass_gemm_dispatch<gemm::tiling_strategy::Medium, math_op, TransformA, TransformB, value_t, accum_t>,
+        gemm::tiling_strategy::Medium,
         TransformA,
         TransformB,
         value_t,
         accum_t>(m, n, k, accum_t(alpha), accum_t(beta));
 
-    test_error |= test<
+    test_error |= test_bsc<
         cutlass_gemm_dispatch<gemm::tiling_strategy::Large, math_op, TransformA, TransformB, value_t, accum_t>,
+        gemm::tiling_strategy::Large,
         TransformA,
         TransformB,
         value_t,
         accum_t>(m, n, k, accum_t(alpha), accum_t(beta));
 
-    test_error |= test<
+    test_error |= test_bsc<
         cutlass_gemm_dispatch<gemm::tiling_strategy::Tall, math_op, TransformA, TransformB, value_t, accum_t>,
+        gemm::tiling_strategy::Tall,
         TransformA,
         TransformB,
         value_t,
         accum_t>(m, n, k, accum_t(alpha), accum_t(beta));
 
-    test_error |= test<
+    test_error |= test_bsc<
         cutlass_gemm_dispatch<gemm::tiling_strategy::Wide, math_op, TransformA, TransformB, value_t, accum_t>,
+        gemm::tiling_strategy::Wide,
         TransformA,
         TransformB,
         value_t,
         accum_t>(m, n, k, accum_t(alpha), accum_t(beta));
 
-    test_error |= test<
+    test_error |= test_bsc<
         cutlass_gemm_dispatch<gemm::tiling_strategy::Huge, math_op, TransformA, TransformB, value_t, accum_t>,
+        gemm::tiling_strategy::Huge,
         TransformA,
         TransformB,
         value_t,
@@ -442,18 +710,6 @@ int main(int argc, const char **argv)
     typedef double      value_t;
     typedef double      accum_t;
     const math_operation_class_t math_op = math_operation_class_t::scalar;
-#elif defined(TEST_HGEMM)
-    typedef __half      value_t;
-    typedef __half      accum_t;
-    const math_operation_class_t math_op = math_operation_class_t::scalar;
-#elif defined(TEST_IGEMM)
-    typedef int8_t      value_t;
-    typedef int32_t     accum_t;
-    const math_operation_class_t math_op = math_operation_class_t::scalar;
-#elif defined(TEST_WGEMM)
-    typedef half        value_t;
-    typedef float       accum_t;
-    const math_operation_class_t math_op = math_operation_class_t::matrix;
 #else
     #error Unknown GEMM type requested.
 #endif
@@ -516,6 +772,8 @@ int main(int argc, const char **argv)
         exit(1);
     }
 
+    // printf("size of value_t: %d \n", sizeof(value_t)); // 4 for sgemm (float)
+
     bool test_error = false;
 
     if (g_schmoo)
@@ -528,34 +786,38 @@ int main(int argc, const char **argv)
         std::uniform_real_distribution<float> dis(5, 14);
         for (int i = 0; i < g_schmoo; ++i)
         {
-        	int m = int(pow(float(2), dis(gen)));
-        	int n = int(pow(float(2), dis(gen)));
-        	int k = int(pow(float(2), dis(gen)));
+            int m = int(pow(float(2), dis(gen)));
+            int n = int(pow(float(2), dis(gen)));
+            int k = int(pow(float(2), dis(gen)));
 
-        	// Round m and n to nearest multiple of 32 if < 128, otherwise to the nearest 128
-        	m = (m < 128) ?
-        			round_nearest(m, 32) :
-        			round_nearest(m, 128);
-        	n = (n < 128) ?
-        			round_nearest(n, 32) :
-        			round_nearest(n, 128);
+            // Round m and n to nearest multiple of 32 if < 128, otherwise to the nearest 128
+            m = (m < 128) ?
+                    round_nearest(m, 32) :
+                    round_nearest(m, 128);
+            n = (n < 128) ?
+                    round_nearest(n, 32) :
+                    round_nearest(n, 128);
 
-        	// Round k to the nearest 16
+            // Round k to the nearest 16
             k = (sizeof(value_t) == 1) ?
                 round_nearest(k, 32) :
                 round_nearest(k, 16);
 
-        	test_error |= test<math_op, TransformA, TransformB, value_t, accum_t>(
+            test_error |= test<math_op, TransformA, TransformB, value_t, accum_t>(
                 m, n, k,
                 from_float<accum_t>(alpha),
                 from_float<accum_t>(beta));
 
-        	printf("\n"); fflush(stdout);
+            printf("\n"); fflush(stdout);
         }
     }
     else
     {
         // Test a single GEMM problem size
+        // It calls 'test' right above main
+        // int TA = (matrix_transform_t::Transpose == TransformA)? 1 : 0; // for NN, TransformA & B both are NonTranspose
+        // int TB = (matrix_transform_t::Transpose == TransformB)? 1 : 0;
+        // printf("TA: %d, TB: %d \n", TA, TB);
         test_error |= test<math_op, TransformA, TransformB, value_t, accum_t>(
             m,
             n,

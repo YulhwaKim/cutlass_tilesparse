@@ -106,6 +106,18 @@ struct io_vector <
     static_assert(is_pow2<AlignBytes>::value, "I/O vector alignment must be a power-of-two.");
     static_assert((AlignBytes <= 16), "I/O vector alignment must <= 16B.");
 
+
+    // for debugging
+    inline __device__
+    void print_info()
+    {
+        // MaxVectoritems: 4
+        // MaxAlignBytes: 16
+        // VectorItems: 4
+        // AlignBytes: 16
+        printf("MaxVectorItems: %d, MaxAlignBytes: %d, VectorItems: %d, AlignBytes: %d \n", MaxVectorItems, MaxAlignBytes, VectorItems, AlignBytes);
+    }
+
     inline __device__
     void load(const io_vector *ptr)
     {

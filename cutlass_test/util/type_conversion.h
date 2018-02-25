@@ -32,7 +32,6 @@
  * \brief Utilities for converting between types and assessing traits
  */
 
-#include "half.h"
 
 namespace cutlass {
 
@@ -47,13 +46,6 @@ value_t from_float(float val)
     return value_t(val);
 }
 
-/// Convert float to value type (__half specialization)
-template <>
-__half from_float<__half>(float val)
-{
-    return half_t(val);
-}
-
 
 /******************************************************************************
  * Type conversion utilities
@@ -66,16 +58,6 @@ struct integer_alias;
 template <>
 struct integer_alias<int8_t> {
     using type = int8_t;
-};
-
-template <>
-struct integer_alias<half_t> {
-    using type = int16_t;
-};
-
-template <>
-struct integer_alias<__half> {
-    using type = int16_t;
 };
 
 template <>
@@ -102,24 +84,8 @@ struct integer_alias<double> {
 /// Returns a string to prefix 'gemm' to construct CUBLAS-like kernel names
 template <math_operation_class_t math_op, typename value_t, typename accum_t> char const *to_prefix_string();
 
-template <> char const *to_prefix_string<math_operation_class_t::scalar, half_t, half_t>() {
-    return "H";
-}
-
-template <> char const *to_prefix_string<math_operation_class_t::scalar, __half, __half>() {
-    return "H";
-}
-
 template <> char const *to_prefix_string<math_operation_class_t::scalar, float, float>() {
     return "S";
-}
-
-template <> char const *to_prefix_string<math_operation_class_t::matrix, __half, __half>() {
-    return "WmmaH";
-}
-
-template <> char const *to_prefix_string<math_operation_class_t::matrix, __half, float>() {
-    return "WmmaS";
 }
 
 template <> char const *to_prefix_string<math_operation_class_t::scalar, double, double>() {

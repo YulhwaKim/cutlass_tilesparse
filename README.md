@@ -1,106 +1,26 @@
-![ALT](/media/fig-09-complete-hierarchy.png "Complete CUDA GEMM decomposition")
+# cutlass_tilesparse
+Cuda templates for tile-sparse matrix multiplication based on [CUTLASS](https://github.com/NVIDIA/cutlass).
+
 
 # Introduction
+Since Matrix Multiplication occupy most of the Neural Network computations, diversification and optimization on Matrix Multiplication kernels can give inspiration for the efficient Neural Network design.
 
-CUTLASS is a collection of CUDA C++ template abstractions for implementing 
-high-performance matrix-multiplication (GEMM) at all levels and scales within CUDA. 
-It incorporates strategies for hierarchical decomposition and data movement similar 
-to those used to implement cuBLAS.  CUTLASS decomposes these "moving parts" into 
-reusable, modular software components abstracted by C++ template classes.  These
-thread-wide, warp-wide, block-wide, and device-wide primitives can be specialized 
-and tuned via custom tiling sizes, data types, and other algorithmic policy. The 
-resulting flexibility simplifies their use as building blocks within custom kernels 
-and applications.
+In this project, we developed Tile-sparse Matrix multiplication. It is inspired by the tiling algorithm that is used to compute Matrix Multiplication on GPU. To utilize on-chip shared memory efficiently, matrices are partitioned into tiles, and each tile do the computation independently. For this reason, if we assign sparsity in tile-wise manner, then we can compute sparse matrix multiplication without noticeable overhead. We implemented the CUDA-level kernel for tile-spare matrix multiplication by hacking [CUTLASS](https://github.com/NVIDIA/cutlass).
 
-To support a wide variety of applications, CUTLASS provides extensive support for
-mixed-precision computations, providing specialized data-movement and 
-multiply-accumulate abstractions for 8-bit integer, half-precision floating 
-point (FP16), single-precision floating point (FP32), and double-precision floating 
-point (FP64) types.  Furthermore, CUTLASS demonstrates CUDA's WMMA API for targeting
-the programmable, high-throughput _Tensor Cores_ provided by NVIDIA's Volta architecture 
-and beyond.
 
-For more exposition, see our Parallel Forall blog post [CUTLASS: Fast Linear Algebra 
-in CUDA C++](https://devblogs.nvidia.com/parallelforall/cutlass-linear-algebra-cuda). 
+# Tile-sparse matrix encoding
+![ALT](/images/bsc.png "Tile-sparse matrix encoding")
+The tile-sparse matrix is encoded with CSC (Compressed Column Storage). The difference between the conventional CSC and tile-sparse CSC is that the basic encoding unit is the tile, not the single data point.
+As the above figure, ptr stores accumulated non-zero tiles for each column, indices stores row indices of each tile, and data stores data on non-zero tiles.
+
 
 # Performance
-
-<p align="center"><img src=/media/cutlass-performance-plot.png></p>
-
-CUTLASS primitives are very efficient.  When used to construct device-wide GEMM kernels, 
-they exhibit performance comparable to cuBLAS for scalar GEMM 
-computations. The above figure shows CUTLASS performance relative to cuBLAS 
-for large matrix dimensions (M=10240, N=K=4096) running on an NVIDIA Tesla V100 GPU 
-when compiled with CUDA 9.0. 
-
-# Project Structure
-
-CUTLASS is arranged as a header-only library with several example test programs
-that demonstrate instantiating a GEMM task within a CUDA kernel. Comments inline
-with the source explain the individual components.
-
-The repository is organized in the following arrangement.
-
-    cutlass/                Root of header-only source library for matrix multiply
-      gemm/                 Implementation of GEMM __device__ code and supporting components
-      util/                 Utility components for CUDA device-side CUDA development
-
-A test program is provided to illustrate the use of CUTLASS. This is implemented
-in the following directory.
-
-    cutlass_test            Root of test programs depicting CUTLASS kernels
-      util/                 Utilities
-      gemm.cu               Simple example calling CUTLASS and CUBLAS GEMM kernels
-      Makefile              Build script for test programs
+![ALT](/images/performance.png "Tile-sparse performance comparison with Block-sparse on Matrix Multiplication. The weight matrix size is 4096x4096, and the minibatch is size of 32. The size of block/tile is 32x32.")
+Recently, OpenAI released [Block-sparse GPU Kernels](https://github.com/openai/blocksparse). As Tile-sparse, it computes block-wise sparse matrix. We compared the performance of Block-sparse and Tile-sparse kernels with TitanXp and CUDA9.0. As the above figure shows, Tile-sparse is slightly faster than Block-sparse, when used a 4096x4096 weight matrix, minibatch size of 32 and block/tile size of 32x32. (The relative speed can be changed according to the matrix size, minibatch size, and the tile size.)
 
 
-# Makefile usage
+# Makefile & Program Usage
+It is as same as [CUTLASS](https://github.com/NVIDIA/cutlass), but options for the makefile are reduced as follow.
 
-There are different sample targets for different GEMM data types and
-transposititions.  Be sure to specify your target architecture.
-
-    make <sgemm|dgemm|hgemm|igemm|wgemm> sm=<60|61|70> \
-      [transpose=<nn|nt|tn|tt>] [verbose=<0|1>] [keep=<0|1>]
-
-
-# Program usage
-
- Program usage:
-
-     <s|d|h|i|w>gemm_<nn|nt|tn|tt>
-           [--help]
-           [--schmoo=<#schmoo-samples> || --m=<height> --n=<width> --k=<depth>]
-           [--i=<timing iterations>]
-           [--device=<device-id>]
-           [--alpha=<alpha> --beta=<beta>]
-
-
-# Open Source License
-
-CUTLASS is released by NVIDIA Corporation under the "New BSD" open-source license:
-
-```
-Copyright (c) 2017, NVIDIA CORPORATION.  All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-   *  Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-   *  Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-   *  Neither the name of the NVIDIA CORPORATION nor the
-      names of its contributors may be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-```
+    make <sgemm|dgemm> sm=<60|61> \
+      [transpose=<nn>] [verbose=<0|1>] [keep=<0|1>]

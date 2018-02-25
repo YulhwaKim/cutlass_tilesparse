@@ -101,8 +101,6 @@ DEPS := $(call rwildcard, $(BASE_DIR),*.h) \
 
 ALL :=  sgemm \
         dgemm \
-        hgemm \
-        igemm
 
 
 #-------------------------------------------------------------------------------
@@ -147,34 +145,3 @@ dgemm: bin/dgemm_$(TRANSPOSE)_$(BIN_SUFFIX)
 bin/dgemm_$(TRANSPOSE)_$(BIN_SUFFIX) : gemm.cu $(DEPS)
 	mkdir -p bin
 	$(NVCC) -DTEST_DGEMM $(DEFINES) $(SM_TARGETS) -o $@ gemm.cu $(NVCCFLAGS) $(CPU_ARCH) $(INC) $(LIBINC) $(LIBS)
-
-#-------------------------------------------------------------------------------
-# make hgemm
-#-------------------------------------------------------------------------------
-
-hgemm: bin/hgemm_$(TRANSPOSE)_$(BIN_SUFFIX)
-
-bin/hgemm_$(TRANSPOSE)_$(BIN_SUFFIX) : gemm.cu $(DEPS)
-	mkdir -p bin
-	$(NVCC) -DTEST_HGEMM $(DEFINES) $(SM_TARGETS) -o $@ gemm.cu $(NVCCFLAGS) $(CPU_ARCH) $(INC) $(LIBINC) $(LIBS)
-
-#-------------------------------------------------------------------------------
-# make igemm
-#-------------------------------------------------------------------------------
-
-igemm: bin/igemm_$(TRANSPOSE)_$(BIN_SUFFIX)
-
-bin/igemm_$(TRANSPOSE)_$(BIN_SUFFIX) : gemm.cu $(DEPS)
-	mkdir -p bin
-	$(NVCC) -DTEST_IGEMM $(DEFINES) $(SM_TARGETS) -o $@ gemm.cu $(NVCCFLAGS) $(CPU_ARCH) $(INC) $(LIBINC) $(LIBS)
-
-#-------------------------------------------------------------------------------
-# make wgemm
-#-------------------------------------------------------------------------------
-
-wgemm: bin/wgemm_$(TRANSPOSE)_$(BIN_SUFFIX)
-
-bin/wgemm_$(TRANSPOSE)_$(BIN_SUFFIX) : gemm.cu $(DEPS)
-	mkdir -p bin
-	$(NVCC) -DTEST_WGEMM -DWMMA $(DEFINES) $(SM_TARGETS) -o $@ gemm.cu $(NVCCFLAGS) $(CPU_ARCH) $(INC) $(LIBINC) $(LIBS)
-

@@ -39,9 +39,6 @@
 #include <cutlass/gemm/dispatch.h>
 #include <cutlass/gemm/epilogue_function.h>
 
-// Test utilities
-#include "util/type_conversion.h"
-
 namespace cutlass {
 
 
@@ -93,9 +90,11 @@ struct cutlass_gemm_dispatch
     static const matrix_transform_t::kind_t         TransformA = _TransformA;
     static const matrix_transform_t::kind_t         TransformB = _TransformB;
 
+
     using value_t = _value;
     using accum_t = _accum;
     using epilogue_op_t = _epilogue_op_t;
+
 
     //
     // Methods
@@ -122,10 +121,14 @@ struct cutlass_gemm_dispatch
         epilogue_op_t                           epilogue_op,
         value_t                                 *A,
         value_t                                 *B,
+        int                                     *B_ptr,
+        int                                     *B_indices,
         accum_t                                 *C,
         cudaStream_t                            stream = 0,
         bool                                    debug_synchronous = false)
     {
+
+        // printf("operand_alignment: %d \n", operand_alignment); // it is 16, while value_t is 4.
         return gemm::device_gemm<
                 TilingStrategy,
                 math_op,
@@ -144,6 +147,8 @@ struct cutlass_gemm_dispatch
                 epilogue_op,
                 A,
                 B,
+                B_ptr,
+                B_indices,
                 C,
                 stream,
                 debug_synchronous);
@@ -157,6 +162,8 @@ struct cutlass_gemm_dispatch
         int             k,                          ///< Inner dimension of GEMM problem
         value_t         *A,                         ///< A matrix
         value_t         *B,                         ///< B matrix
+        int             *B_ptr,                     ///< ptr of pruned B matrix
+        int             *B_indices,                 ///< indices of pruned B matrix
         accum_t         *C,                         ///< C matrix
         accum_t         alpha,                      ///< Scalar used for multiplicands
         accum_t         beta,                       ///< Scalar used for addend
@@ -185,6 +192,7 @@ struct cutlass_gemm_dispatch
             !((sizeof(operand_load_t) * lda) % 16) &&
             !((sizeof(operand_load_t) * ldb) % 16))
         {
+            // printf("here!\n"); // Here!! 
             #if !(GEMM_ALIGNMENT) || (GEMM_ALIGNMENT == 16)
                 return launch<__NV_STD_MAX(16, sizeof(value_t)), accumulator_alignment>(
                         m,
@@ -193,6 +201,8 @@ struct cutlass_gemm_dispatch
                         epilogue,
                         A,
                         B,
+                        B_ptr,
+                        B_indices,
                         C,
                         stream,
                         debug_synchronous);
@@ -210,6 +220,8 @@ struct cutlass_gemm_dispatch
                         epilogue,
                         A,
                         B,
+                        B_ptr,
+                        B_indices,
                         C,
                         stream,
                         debug_synchronous);
@@ -227,29 +239,11 @@ struct cutlass_gemm_dispatch
                         epilogue,
                         A,
                         B,
+                        B_ptr,
+                        B_indices,
                         C,
                         stream,
                         debug_synchronous);
-            #endif
-        }
-        else if ((!force_operand_alignment || force_operand_alignment == 2) &&
-            !((sizeof(operand_load_t) * lda) % 2) &&
-            !((sizeof(operand_load_t) * ldb) % 2))
-        {
-            // 16-bit alignment only supported for HGEMM
-            #if defined(TEST_HGEMM) || defined(TEST_WGEMM)
-                #if !(GEMM_ALIGNMENT) || (GEMM_ALIGNMENT == 2)
-                    return launch<__NV_STD_MAX(2, sizeof(value_t)), accumulator_alignment>(
-                            m,
-                            n,
-                            k,
-                            epilogue,
-                            A,
-                            B,
-                            C,
-                            stream,
-                            debug_synchronous);
-                #endif
             #endif
         }
 

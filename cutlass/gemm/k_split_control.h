@@ -79,6 +79,7 @@ __global__ void prepare_kernel(int *d_flags_split_k)
 struct k_split_control
 {
     /// Extent of a thread block's partition along the GEMM K-axis
+    // for tested cases, split_k is the number of k element that on z-dim block is responsible for
     int split_k;
 
     /// Whether or not to use a semaphore for inter-block k-splitting.
@@ -210,6 +211,8 @@ struct k_split_control
             block_dims,
             grid_dims);
 
+        // printf("Here original split_k (dim_k) %d \n", split_k); // for tested cases, split_k is always dim_k
+
         // Update split-k if wave efficiency is less than some threshold
         if (wave_efficiency < 0.9)
         {
@@ -231,7 +234,8 @@ struct k_split_control
             num_partitions = (dim_k + new_split_k - 1) / new_split_k;
 
             // Update grid dims and k if we meet the minimum number of iterations worth the overhead of splitting
-            int min_iterations_k = 8;
+            // set min_iterations_k 16 if we want to check better performance than cublas on 1024 x 1024 matrix
+            int min_iterations_k = 16;//8;
 
             if (((new_split_k / block_tile_items_k) > min_iterations_k) &&    // We're going to go through at least this many k iterations
                 (sm_count * max_sm_occupancy < NumFlagsSplitK))             // We have enough semaphore flags allocated
@@ -240,6 +244,9 @@ struct k_split_control
                 split_k = new_split_k;
             }
         }
+
+        // printf("Updated split_k %d \n", split_k);
+
 
         use_semaphore = (grid_dims.z > 1);
     }

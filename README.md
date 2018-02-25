@@ -9,7 +9,7 @@ In this project, we developed Tile-sparse Matrix multiplication. It is inspired 
 
 
 # Tile-sparse matrix encoding
-![ALT](/images/bsc.png "Tile-sparse matrix encoding"){:height="50%" width="50%"}.
+!["Tile-sparse matrix encoding"|medium](/images/bsc.png ).
 The tile-sparse matrix is encoded with CSC (Compressed Column Storage). The difference between the conventional CSC and tile-sparse CSC is that the basic encoding unit is the tile, not the single data point.
 As the above figure, ptr stores accumulated non-zero tiles for each column, indices stores row indices of each tile, and data stores data on non-zero tiles.
 

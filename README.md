@@ -20,7 +20,7 @@ Compared to the Block-sparse GPU which was written in the assembly language leve
 
 
 # Makefile & Program Usage
-It is as same as [CUTLASS](https://github.com/NVIDIA/cutlass), but options for the makefile are reduced as follow.
+It is as same as [CUTLASS, NVIDIA](https://github.com/NVIDIA/cutlass), but options for the makefile are reduced as follow.
 
     make <sgemm|dgemm> sm=<60|61> \
       [transpose=<nn>] [verbose=<0|1>] [keep=<0|1>]

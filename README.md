@@ -28,4 +28,5 @@ It is as same as [CUTLASS, NVIDIA](https://github.com/NVIDIA/cutlass), but optio
 
 # Reference
 [1] NVIDIA. 2017. CUTLASS. Available at: https://github.com/NVIDIA/cutlass.
+
 [2] OpenAI. 2017. Blocksparse. Available at: https://github.com/openai/blocksparse.
